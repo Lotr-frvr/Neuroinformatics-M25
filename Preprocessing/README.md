@@ -30,5 +30,5 @@ A more efficient and widely recommended preprocessing pipeline is:
 
 Key differences:
 - Bad channel removal is done before epoching and plotting, reducing redundant processing and avoiding plotting with noisy channels.
-- Filtering is broad (bandpass + notch), not just notch. A bandpass keep sonly the frequency of interest adn removes all the noise.
+- Filtering is broad (bandpass + notch), not just notch. A bandpass keeps only the frequency of interest and removes all the noise.
 
