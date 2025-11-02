@@ -1,0 +1,94 @@
+%% add baseline correction and multitaper 
+
+%% Load data
+load sampleEEGdata
+
+chanLabel = 'p7'; % same electrode 
+freq2plot = 15; % Hz
+baseline = [-200 0]; % ms baseline
+times = EEG.times;
+chanIdx = strcmpi(chanLabel,{EEG.chanlocs.labels});
+
+%% Time windows for power extraction
+times2save = -300:10:600; 
+times2saveIdx = zeros(size(times2save));
+for i=1:length(times2save)
+    [~,times2saveIdx(i)] = min(abs(times - times2save(i)));
+end
+
+%% Complex Wavelet 
+m = 6; % wavelet width (#cycles) Controls TF trade-off
+s = m/(2*pi*freq2plot); % std of Gaussian
+wavetime = -1:1/EEG.srate:1;
+wavelet = exp(2*1i*pi*freq2plot*wavetime) .* exp(-wavetime.^2/(2*s^2));
+waveletX = fft(wavelet,length(wavelet)+EEG.pnts);
+
+dataX = squeeze(EEG.data(chanIdx,:,:));
+dataX = detrend(dataX')';
+dataX = fft(dataX,length(wavelet)+EEG.pnts,2);
+
+convRes = ifft(waveletX.*dataX,[],2);
+convRes = convRes(:,floor(length(wavetime)/2)+1:end-floor(length(wavetime)/2));
+
+wavePow = mean(abs(convRes).^2,1);
+
+% extract time-course power at desired frequency
+wavePow = wavePow(times2saveIdx);
+
+%% Baseline correction
+baseIdx = times2save>=baseline(1) & times2save<=baseline(2);
+wavePow_db = 10*log10(wavePow ./ mean(wavePow(baseIdx)));
+
+%% Filter-Hilbert
+freqband = [freq2plot-2 freq2plot+2]; % bandpass width
+bp_fIR = fir1(250,freqband/(EEG.srate/2));
+temp = filtfilt(bp_fIR,1,dataX')';
+
+hilb = hilbert(temp')';
+hilbPow = mean(abs(hilb).^2,1);
+hilbPow = hilbPow(times2saveIdx);
+
+% baseline correct
+hilbPow_db = 10*log10(hilbPow ./ mean(hilbPow(baseIdx)));
+
+%% Short-Time FFT 
+timewin = 400; % ms
+timewinidx = round(timewin/(1000/EEG.srate));
+hann_win = .5*(1-cos(2*pi*(0:timewinidx-1)/(timewinidx-1)));
+frex = linspace(0,EEG.srate/2,floor(timewinidx/2)+1);
+[~,freqIdx] = min(abs(frex-freq2plot));
+
+stFFTpow = zeros(size(times2save));
+for ti=1:length(times2save)
+    tidx = times2saveIdx(ti);
+    dat = squeeze(EEG.data(chanIdx,tidx-floor(timewinidx/2):tidx+floor(timewinidx/2)-1,:));
+    dat = bsxfun(@times,dat,hann_win');
+    fdat = fft(dat,[],1)/timewinidx;
+    pow = mean(abs(fdat(freqIdx-2:freqIdx+2,:)).^2,1);
+    stFFTpow(ti) = mean(pow);
+end
+
+% baseline correction 
+stFFTpow_db = 10*log10(stFFTpow ./ mean(stFFTpow(baseIdx)));
+
+%% Plots
+figure
+subplot(311)
+plot(times2save,wavePow_db,'linewidth',2)
+title(['Wavelet | ' chanLabel ' @ ' num2str(freq2plot) ' Hz'])
+ylabel('Power (dB)'), grid on
+xlim([times2save(1) times2save(end)])
+
+subplot(312)
+plot(times2save,hilbPow_db,'linewidth',2)
+title('Filter-Hilbert')
+ylabel('Power (dB)'), grid on
+xlim([times2save(1) times2save(end)])
+
+subplot(313)
+plot(times2save,stFFTpow_db,'linewidth',2)
+title('Short-time FFT')
+ylabel('Power (dB)')
+xlabel('Time (ms)'), grid on
+xlim([times2save(1) times2save(end)])
+sgtitle('Power Comparison Across Methods (Baseline-corrected)')
