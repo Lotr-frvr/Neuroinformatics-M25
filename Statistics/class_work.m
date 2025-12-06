@@ -1,7 +1,7 @@
-clc; close all;clear all;
+clc; close all; clear all;
 load sampleEEGdata.mat
 
-% Input parameter 
+% Input parameters
 chan2use = 'fcz';
 min_freq = 3;
 max_freq = 30;
@@ -23,8 +23,14 @@ data = squeeze(EEG.data(chanidx, :, :)); % time x trials
 % Initialize power matrix: freqs x time x trials
 power_all = zeros(num_freq, EEG.pnts, EEG.trials);
 
+fprintf('Computing time-frequency decomposition...\n');
+
 % Compute time-frequency decomposition
 for fi = 1:num_freq
+    if mod(fi, 5) == 0
+        fprintf('  Processing frequency %d/%d (%.2f Hz)\n', fi, num_freq, freqs(fi));
+    end
+    
     % Create Morlet wavelet
     s = wave_num / (2 * pi * freqs(fi)); % standard deviation
     wavetime = -2:1/EEG.srate:2; % wavelet time vector
@@ -36,21 +42,21 @@ for fi = 1:num_freq
     n_conv = n_wavelet + n_data - 1;
     half_wave = floor(n_wavelet/2);
     
-    % FFT of wavelet
+    % FFT of wavelet (only compute once per frequency)
     fft_wave = fft(morlet_wave, n_conv);
     
-    % Convolve with each trial
-    for ti = 1:EEG.trials
-        % FFT of data
-        fft_data = fft(data(:, ti), n_conv);
-        
-        % Convolution in frequency domain
-        convolution = ifft(fft_wave .* fft_data);
-        convolution = convolution(half_wave+1:end-half_wave);
-        
-        % Store power
-        power_all(fi, :, ti) = abs(convolution).^2;
-    end
+    % Vectorized convolution across all trials
+    % FFT of all trials at once
+    fft_data = fft(data, n_conv, 1); % FFT along dimension 1 (time)
+    
+    % Convolution in frequency domain (broadcasting)
+    convolution = ifft(fft_wave.' .* fft_data, [], 1);
+    
+    % Trim edges and extract valid convolution
+    convolution = convolution(half_wave+1:end-half_wave, :);
+    
+    % Store power for all trials
+    power_all(fi, :, :) = abs(convolution).^2;
 end
 
 fprintf('TFR computed: %d freqs x %d timepoints x %d trials\n', ...
@@ -62,98 +68,233 @@ fprintf('TFR computed: %d freqs x %d timepoints x %d trials\n', ...
 baseline_time = [-500 -200]; % in ms
 baseline_idx = find(EEG.times >= baseline_time(1) & EEG.times <= baseline_time(2));
 
-% Compute baseline mean and std for each frequency across all trials
+fprintf('\nComputing baseline statistics...\n');
+fprintf('Baseline period: %.0f to %.0f ms (%d timepoints)\n', ...
+    baseline_time(1), baseline_time(2), length(baseline_idx));
+
+%% Method 1: Proper dB-based baseline correction
+% Extract baseline power for each frequency and trial
 baseline_power = power_all(:, baseline_idx, :); % freqs x baseline_times x trials
-baseline_power_mean = mean(baseline_power(:, :), 2); % freqs x 1
-baseline_power_std = std(baseline_power(:, :), 0, 2); % freqs x 1
 
-% Convert power to dB
-power_db = 10 * log10(power_all);
-baseline_db_mean = 10 * log10(baseline_power_mean);
-baseline_db_std = 10 * log10(baseline_power_std);
+% Compute mean baseline power for each frequency across time and trials
+% Shape: freqs x 1 x 1 (for broadcasting)
+baseline_power_mean = mean(baseline_power, [2, 3]); % mean across time and trials
 
-% Compute Z-scores: (power - baseline_mean) / baseline_std
-% Z-score normalization for each frequency
-z_power = zeros(size(power_all));
-for fi = 1:num_freq
-    z_power(fi, :, :) = (power_all(fi, :, :) - baseline_power_mean(fi)) / baseline_power_std(fi);
-end
+% Convert to dB relative to baseline
+% This is the standard approach in time-frequency analysis
+power_db_corrected = 10 * log10(bsxfun(@rdivide, power_all, baseline_power_mean));
+
+fprintf('Baseline-corrected power (dB) computed\n');
+
+%% Method 2: Z-score normalization (trial-by-trial)
+% For proper z-scoring, we need baseline statistics in dB space
+baseline_db = 10 * log10(baseline_power);
+
+% Compute baseline mean and std for each frequency (across time and trials)
+baseline_db_mean = mean(baseline_db, [2, 3]); % freqs x 1 x 1
+baseline_db_std = std(baseline_db, 0, [2, 3]); % freqs x 1 x 1
+
+% Convert all power to dB first
+power_db_all = 10 * log10(power_all);
+
+% Compute Z-scores: (power_dB - baseline_mean_dB) / baseline_std_dB
+z_power = bsxfun(@rdivide, ...
+    bsxfun(@minus, power_db_all, baseline_db_mean), ...
+    baseline_db_std);
 
 fprintf('Z-score normalization completed\n');
 
-%% Visualization
-figure('Position', [100 100 1400 800]);
+%% Alternative Method 3: Percent change from baseline
+% Sometimes used in practice
+percent_change = 100 * (power_all - baseline_power_mean) ./ baseline_power_mean;
 
-% Plot 1: Mean power across trials (dB)
-subplot(2, 3, 1);
-mean_power_db = mean(power_db, 3);
-imagesc(EEG.times, freqs, mean_power_db);
-axis xy;
-colorbar;
-xlabel('Time (ms)');
-ylabel('Frequency (Hz)');
-title('Mean Power (dB)');
-colormap('jet');
-
-% Plot 2: Mean Z-scored power
-subplot(2, 3, 2);
+%% Compute mean values for visualization
+mean_power_raw = mean(power_all, 3);
+mean_power_db_corrected = mean(power_db_corrected, 3);
 mean_z_power = mean(z_power, 3);
-imagesc(EEG.times, freqs, mean_z_power);
+mean_percent_change = mean(percent_change, 3);
+
+%% Visualization
+figure('Position', [50 50 1600 1000]);
+
+% Plot 1: Raw mean power
+subplot(3, 3, 1);
+imagesc(EEG.times, freqs, mean_power_raw);
 axis xy;
 colorbar;
 xlabel('Time (ms)');
 ylabel('Frequency (Hz)');
-title('Mean Z-scored Power');
-colormap('jet');
+title('Mean Raw Power');
+set(gca, 'YScale', 'log');
+set(gca, 'YTick', [3 5 8 13 20 30]);
+colormap(gca, 'parula');
+hold on;
+xline(0, 'w--', 'LineWidth', 1.5);
+xline(baseline_time(1), 'r--', 'LineWidth', 1);
+xline(baseline_time(2), 'r--', 'LineWidth', 1);
 
-% Plot 3: Baseline-corrected power (dB relative to baseline)
-subplot(2, 3, 3);
-power_db_baseline_corrected = zeros(size(power_db));
-for fi = 1:num_freq
-    power_db_baseline_corrected(fi, :, :) = power_db(fi, :, :) - baseline_db_mean(fi);
-end
-mean_power_db_corrected = mean(power_db_baseline_corrected, 3);
+% Plot 2: Baseline-corrected power (dB) - RECOMMENDED
+subplot(3, 3, 2);
 imagesc(EEG.times, freqs, mean_power_db_corrected);
 axis xy;
 colorbar;
 xlabel('Time (ms)');
 ylabel('Frequency (Hz)');
-title('Baseline-corrected Power (dB)');
-colormap('jet');
+title('Baseline-corrected Power (dB) [STANDARD]');
+set(gca, 'YScale', 'log');
+set(gca, 'YTick', [3 5 8 13 20 30]);
+colormap(gca, 'jet');
 caxis([-3 3]);
+hold on;
+xline(0, 'w--', 'LineWidth', 1.5);
+xline(baseline_time(1), 'k--', 'LineWidth', 0.5);
+xline(baseline_time(2), 'k--', 'LineWidth', 0.5);
 
-% Plot 4: Power at a specific frequency (e.g., 10 Hz)
-subplot(2, 3, 4);
-[~, freq_idx] = min(abs(freqs - 10)); % Find closest to 10 Hz
-plot(EEG.times, squeeze(mean(power_all(freq_idx, :, :), 3)));
+% Plot 3: Z-scored power
+subplot(3, 3, 3);
+imagesc(EEG.times, freqs, mean_z_power);
+axis xy;
+colorbar;
 xlabel('Time (ms)');
-ylabel('Power');
-title(sprintf('Power at %.1f Hz', freqs(freq_idx)));
-grid on;
+ylabel('Frequency (Hz)');
+title('Z-scored Power');
+set(gca, 'YScale', 'log');
+set(gca, 'YTick', [3 5 8 13 20 30]);
+colormap(gca, 'jet');
+caxis([-3 3]);
+hold on;
+xline(0, 'w--', 'LineWidth', 1.5);
+xline(baseline_time(1), 'k--', 'LineWidth', 0.5);
+xline(baseline_time(2), 'k--', 'LineWidth', 0.5);
 
-% Plot 5: Z-score at same frequency
-subplot(2, 3, 5);
-plot(EEG.times, squeeze(mean(z_power(freq_idx, :, :), 3)));
+% Plot 4: Percent change
+subplot(3, 3, 4);
+imagesc(EEG.times, freqs, mean_percent_change);
+axis xy;
+colorbar;
+xlabel('Time (ms)');
+ylabel('Frequency (Hz)');
+title('Percent Change from Baseline');
+set(gca, 'YScale', 'log');
+set(gca, 'YTick', [3 5 8 13 20 30]);
+colormap(gca, 'jet');
+caxis([-100 100]);
+hold on;
+xline(0, 'w--', 'LineWidth', 1.5);
+
+% Plot 5: Power at a specific frequency (e.g., 10 Hz - Alpha)
+subplot(3, 3, 5);
+[~, freq_idx] = min(abs(freqs - 10)); % Find closest to 10 Hz
+plot(EEG.times, squeeze(mean(power_all(freq_idx, :, :), 3)), 'b-', 'LineWidth', 1.5);
+xlabel('Time (ms)');
+ylabel('Power (raw)');
+title(sprintf('Power at %.1f Hz (Alpha)', freqs(freq_idx)));
+grid on;
+hold on;
+xline(0, 'k--', 'LineWidth', 1.5);
+patch([baseline_time(1) baseline_time(2) baseline_time(2) baseline_time(1)], ...
+    [ylim fliplr(ylim)], 'r', 'FaceAlpha', 0.1, 'EdgeColor', 'none');
+
+% Plot 6: dB-corrected power at same frequency
+subplot(3, 3, 6);
+plot(EEG.times, squeeze(mean(power_db_corrected(freq_idx, :, :), 3)), 'b-', 'LineWidth', 1.5);
+xlabel('Time (ms)');
+ylabel('Power (dB)');
+title(sprintf('dB Power at %.1f Hz', freqs(freq_idx)));
+grid on;
+hold on;
+xline(0, 'k--', 'LineWidth', 1.5);
+yline(0, 'r--', 'LineWidth', 1);
+patch([baseline_time(1) baseline_time(2) baseline_time(2) baseline_time(1)], ...
+    [ylim fliplr(ylim)], 'r', 'FaceAlpha', 0.1, 'EdgeColor', 'none');
+
+% Plot 7: Z-score at same frequency with significance lines
+subplot(3, 3, 7);
+plot(EEG.times, squeeze(mean(z_power(freq_idx, :, :), 3)), 'b-', 'LineWidth', 1.5);
 xlabel('Time (ms)');
 ylabel('Z-score');
 title(sprintf('Z-scored Power at %.1f Hz', freqs(freq_idx)));
 grid on;
 hold on;
-yline(0, 'k--', 'LineWidth', 1);
-yline(1.96, 'r--', 'p < 0.05');
-yline(-1.96, 'r--', 'p < 0.05');
+xline(0, 'k--', 'LineWidth', 1.5);
+yline(0, 'k-', 'LineWidth', 1);
+yline(1.96, 'r--', 'p < 0.05', 'LineWidth', 1);
+yline(-1.96, 'r--', 'p < 0.05', 'LineWidth', 1);
+yline(2.58, 'r:', 'p < 0.01', 'LineWidth', 1);
+yline(-2.58, 'r:', 'p < 0.01', 'LineWidth', 1);
+patch([baseline_time(1) baseline_time(2) baseline_time(2) baseline_time(1)], ...
+    [ylim fliplr(ylim)], 'r', 'FaceAlpha', 0.1, 'EdgeColor', 'none');
 
-% Plot 6: Frequency spectrum at a specific time (e.g., 300 ms)
-subplot(2, 3, 6);
+% Plot 8: Frequency spectrum at a specific time (e.g., 300 ms post-stimulus)
+subplot(3, 3, 8);
 [~, time_idx] = min(abs(EEG.times - 300)); % Find closest to 300 ms
-plot(freqs, squeeze(mean(z_power(:, time_idx, :), 3)));
+plot(freqs, squeeze(mean(z_power(:, time_idx, :), 3)), 'b-o', 'LineWidth', 1.5, 'MarkerSize', 6);
 xlabel('Frequency (Hz)');
 ylabel('Z-score');
 title(sprintf('Z-scored Power at %d ms', round(EEG.times(time_idx))));
 grid on;
 set(gca, 'XScale', 'log');
+set(gca, 'XTick', [3 5 8 13 20 30]);
 hold on;
-yline(0, 'k--', 'LineWidth', 1);
-yline(1.96, 'r--', 'p < 0.05');
+yline(0, 'k-', 'LineWidth', 1);
+yline(1.96, 'r--', 'p < 0.05', 'LineWidth', 1);
+yline(-1.96, 'r--', 'LineWidth', 1);
 
-sgtitle(sprintf('Time-Frequency Analysis - Channel: %s', chan2use)); 
+% Plot 9: Single trial example (raw power)
+subplot(3, 3, 9);
+trial_to_plot = 1;
+imagesc(EEG.times, freqs, power_all(:, :, trial_to_plot));
+axis xy;
+colorbar;
+xlabel('Time (ms)');
+ylabel('Frequency (Hz)');
+title(sprintf('Single Trial (#%d) Raw Power', trial_to_plot));
+set(gca, 'YScale', 'log');
+set(gca, 'YTick', [3 5 8 13 20 30]);
+colormap(gca, 'parula');
+hold on;
+xline(0, 'w--', 'LineWidth', 1.5);
+
+sgtitle(sprintf('Time-Frequency Analysis - Channel: %s', upper(chan2use)), ...
+    'FontSize', 16, 'FontWeight', 'bold');
+
+%% Statistical summary
+fprintf('\n=== Statistical Summary ===\n');
+fprintf('dB-corrected power:\n');
+fprintf('  Mean: %.3f dB, Std: %.3f dB\n', mean(mean_power_db_corrected(:)), std(mean_power_db_corrected(:)));
+fprintf('  Range: [%.3f, %.3f] dB\n', min(mean_power_db_corrected(:)), max(mean_power_db_corrected(:)));
+
+fprintf('\nZ-scored power:\n');
+fprintf('  Mean: %.3f, Std: %.3f\n', mean(mean_z_power(:)), std(mean_z_power(:)));
+fprintf('  Range: [%.3f, %.3f]\n', min(mean_z_power(:)), max(mean_z_power(:)));
+
+% Find peak power in dB
+[max_db, max_idx] = max(mean_power_db_corrected(:));
+[max_f, max_t] = ind2sub(size(mean_power_db_corrected), max_idx);
+fprintf('\nPeak power (dB): %.3f dB at %.2f Hz, %.1f ms\n', ...
+    max_db, freqs(max_f), EEG.times(max_t));
+
+% Find peak z-score
+[max_z, max_z_idx] = max(mean_z_power(:));
+[max_z_f, max_z_t] = ind2sub(size(mean_z_power), max_z_idx);
+fprintf('Peak Z-score: %.3f at %.2f Hz, %.1f ms\n', ...
+    max_z, freqs(max_z_f), EEG.times(max_z_t));
+
+fprintf('\n=== Analysis Complete ===\n');
+
+- Computes Morlet wavelet transform (3-30 Hz, 20 frequencies, 6 cycles)
+- Uses vectorized FFT convolution for efficiency
+- Computes baseline statistics (-500 to -200 ms) across time and trials
+- Applies three normalization methods:
+  - dB-corrected power (standard method)
+  - Z-scored power (for statistics)
+  - Percent change from baseline
+- Generates visualization plots:
+  - Raw power
+  - dB-corrected power
+  - Z-scored power
+  - Percent change
+  - Alpha band (10 Hz) time courses (raw, dB, Z-score)
+  - Frequency spectrum at 300 ms
+  - Single trial example
+- Shows baseline period and significance thresholds

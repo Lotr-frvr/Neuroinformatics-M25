@@ -8,9 +8,9 @@
 % Mike X Cohen assumes no responsibility for inappropriate or incorrect use of this code. 
 
 %% Figure 18.1
-
+    
 figure
-
+ 
 % 1/f function
 c = 1;
 x = 1;

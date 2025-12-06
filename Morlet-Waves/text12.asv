@@ -6,12 +6,11 @@
 % 4. Extracts `real(convolution)` for the bandpassed signal per trial.
 % 5. Averages across trials to produce an ERP per frequency, applies baseline correction, and plots a grid of ERPs (one subplot per frequency).
 % 
-% trial-wise convolution keeps single-trial structure intact prior to averaging 
-% %(preferred when interested in trial variability or single-trial metrics).
+% Key point: trial-wise convolution keeps single-trial structure intact prior to averaging (preferred when interested in trial variability or single-trial metrics).
 
 
 clear; clc;
-load sampleEEGdata 
+load sampleEEGdata
 
 %% ------ Q1: Generate wavelets ------
 
