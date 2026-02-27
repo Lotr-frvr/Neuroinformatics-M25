@@ -281,20 +281,20 @@ fprintf('Peak Z-score: %.3f at %.2f Hz, %.1f ms\n', ...
     max_z, freqs(max_z_f), EEG.times(max_z_t));
 
 fprintf('\n=== Analysis Complete ===\n');
-
-- Computes Morlet wavelet transform (3-30 Hz, 20 frequencies, 6 cycles)
-- Uses vectorized FFT convolution for efficiency
-- Computes baseline statistics (-500 to -200 ms) across time and trials
-- Applies three normalization methods:
-  - dB-corrected power (standard method)
-  - Z-scored power (for statistics)
-  - Percent change from baseline
-- Generates visualization plots:
-  - Raw power
-  - dB-corrected power
-  - Z-scored power
-  - Percent change
-  - Alpha band (10 Hz) time courses (raw, dB, Z-score)
-  - Frequency spectrum at 300 ms
-  - Single trial example
-- Shows baseline period and significance thresholds
+% 
+% - Computes Morlet wavelet transform (3-30 Hz, 20 frequencies, 6 cycles)
+% - Uses vectorized FFT convolution for efficiency
+% - Computes baseline statistics (-500 to -200 ms) across time and trials
+% - Applies three normalization methods:
+%   - dB-corrected power (standard method)
+%   - Z-scored power (for statistics)
+%   - Percent change from baseline
+% - Generates visualization plots:
+%   - Raw power
+%   - dB-corrected power                                                                                                                                                        
+%   - Z-scored power
+%   - Percent change
+%   - Alpha band (10 Hz) time courses (raw, dB, Z-score)
+%   - Frequency spectrum at 300 ms
+%   - Single trial example
+% - Shows baseline period and significance thresholds

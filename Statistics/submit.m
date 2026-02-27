@@ -211,13 +211,13 @@ hold on;
 xline(0, 'k--', 'LineWidth', 1.5);
 
 sgtitle(sprintf('Time-Frequency Analysis: Channel %s', upper(chan2use)), 'FontSize', 14, 'FontWeight', 'bold');
-
-- Computes Morlet wavelet transform (3-30 Hz, 20 frequencies, 6 cycles)
-- Trims time window (-500 to 1200 ms)
-- Performs 2000 circular-shift permutations on raw power
-- Applies baseline normalization (-500 to -100 ms) to each permutation
-- Builds null distribution (mean and std)
-- Computes Z-map comparing observed to null
-- Applies voxel-level threshold (p < 0.01, two-tailed)
-- Implements cluster-based correction (p < 0.05)
-- Identifies significant clusters based on cluster mass statistic
+% 
+% - Computes Morlet wavelet transform (3-30 Hz, 20 frequencies, 6 cycles)
+% - Trims time window (-500 to 1200 ms)
+% - Performs 2000 circular-shift permutations on raw power
+% - Applies baseline normalization (-500 to -100 ms) to each permutation
+% - Builds null distribution (mean and std)
+% - Computes Z-map comparing observed to null
+% - Applies voxel-level threshold (p < 0.01, two-tailed)
+% - Implements cluster-based correction (p < 0.05)
+% - Identifies significant clusters based on cluster mass statistic
